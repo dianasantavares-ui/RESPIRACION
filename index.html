@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Respira un momento</title>
+<style>
+  :root{
+    --rojo:#CC092F; --rojo-vivo:#E00B39; --rojo-oscuro:#900F15;
+    --grafito:#2B2B2E; --gris:#6B6D70; --gris-claro:#EDEDED; --rosa:#FBE6EA;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:Arial,Helvetica,sans-serif;background:#fff;color:var(--grafito);
+    display:flex;align-items:center;justify-content:center;padding:16px;
+  }
+  .card{width:100%;max-width:520px;text-align:center}
+  h1{font-size:22px;font-weight:700;line-height:1.2}
+  h1 span{color:var(--rojo)}
+  .sub{font-size:14px;color:var(--gris);margin-top:6px;line-height:1.45}
+
+  .modes{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:16px 0 4px}
+  .mode{
+    border:1px solid #d6d6d8;background:#fff;color:var(--grafito);font:inherit;font-size:13px;
+    padding:8px 14px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s,border-color .2s;
+  }
+  .mode:hover{border-color:var(--rojo)}
+  .mode[aria-pressed="true"]{background:var(--rojo);border-color:var(--rojo);color:#fff}
+  .mode:disabled{opacity:.45;cursor:default}
+  .desc{font-size:13px;color:var(--gris);min-height:18px;margin-top:6px}
+
+  .stage{
+    position:relative;width:min(270px,68vw);aspect-ratio:1/1;margin:14px auto 10px;
+    border:0;background:none;cursor:pointer;border-radius:50%;display:block;
+  }
+  .stage:focus-visible{outline:3px solid var(--rojo);outline-offset:6px}
+  .halo{position:absolute;inset:0;border-radius:50%;background:var(--rosa)}
+  .ring{position:absolute;inset:0;border-radius:50%;border:2px dashed rgba(204,9,47,.25)}
+  .circle{
+    position:absolute;inset:0;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,var(--rojo-vivo),var(--rojo) 55%,var(--rojo-oscuro));
+    box-shadow:0 12px 32px rgba(204,9,47,.28);
+    transform:scale(.45);opacity:.9;
+    transition-property:transform,opacity;transition-timing-function:ease-in-out;transition-duration:.8s;
+  }
+  .label{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    color:#fff;pointer-events:none;
+  }
+  .phase{font-size:20px;font-weight:700;letter-spacing:.3px}
+  .count{font-size:34px;font-weight:700;line-height:1.1;margin-top:2px;min-height:38px}
+  .idle .phase{font-size:16px}
+
+  .meta{font-size:13px;color:var(--gris);min-height:18px}
+  .btn{
+    margin-top:12px;font:inherit;font-size:15px;font-weight:700;color:#fff;background:var(--grafito);
+    border:0;border-radius:999px;padding:11px 26px;cursor:pointer;
+  }
+  .btn:hover{background:#000}
+  .btn:focus-visible{outline:3px solid var(--rojo);outline-offset:3px}
+  .note{font-size:12px;color:var(--gris);margin-top:12px}
+
+  @media (prefers-reduced-motion: reduce){
+    .circle{transform:scale(.8)!important}
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Respira <span>un momento</span></h1>
+    <p class="sub">Sigue el círculo: crece cuando inhalas, se queda quieto cuando sostienes y se encoge cuando exhalas.</p>
+
+    <div class="modes" role="group" aria-label="Tipo de respiración">
+      <button class="mode" data-mode="calma" aria-pressed="true">Calma 5·5</button>
+      <button class="mode" data-mode="caja" aria-pressed="false">Caja 4·4·4·4</button>
+      <button class="mode" data-mode="478" aria-pressed="false">Relajación 4·7·8</button>
+    </div>
+    <p class="desc" id="desc"></p>
+
+    <button class="stage idle" id="stage" aria-label="Comenzar ejercicio de respiración">
+      <span class="halo"></span>
+      <span class="ring"></span>
+      <span class="circle" id="circle"></span>
+      <span class="label">
+        <span class="phase" id="phase" aria-live="polite">Toca para empezar</span>
+        <span class="count" id="count"></span>
+      </span>
+    </button>
+
+    <p class="meta" id="meta"></p>
+    <button class="btn" id="btn">Comenzar</button>
+    <p class="note">Si te mareas, detente y vuelve a respirar a tu ritmo.</p>
+  </main>
+
+<script>
+(function(){
+  var BIG = 1, SMALL = 0.45;
+  var MODES = {
+    calma: { desc:"Inhala 5, exhala 5. Ideal para bajar revoluciones entre llamadas.", cycles:6,
+             steps:[["Inhala",5,BIG],["Exhala",5,SMALL]] },
+    caja:  { desc:"Inhala 4, sostén 4, exhala 4, sostén 4. Para recuperar el foco.", cycles:4,
+             steps:[["Inhala",4,BIG],["Sostén",4,BIG],["Exhala",4,SMALL],["Sostén",4,SMALL]] },
+    "478": { desc:"Inhala 4, sostén 7, exhala 8. Para soltar tensión.", cycles:4,
+             steps:[["Inhala",4,BIG],["Sostén",7,BIG],["Exhala",8,SMALL]] }
+  };
+
+  var mode = "calma", running = false, timers = [];
+  var $ = function(id){ return document.getElementById(id); };
+  var stage=$("stage"), circle=$("circle"), phase=$("phase"), count=$("count"),
+      meta=$("meta"), btn=$("btn"), desc=$("desc");
+  var modeBtns = document.querySelectorAll(".mode");
+
+  function setCircle(scale, seconds){
+    circle.style.transitionDuration = seconds + "s";
+    circle.style.transform = "scale(" + scale + ")";
+    circle.style.opacity = scale === BIG ? "1" : "0.9";
+  }
+  function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+  function later(fn, ms){ timers.push(setTimeout(fn, ms)); }
+
+  function selectMode(m){
+    mode = m;
+    modeBtns.forEach(function(b){ b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"); });
+    desc.textContent = MODES[m].desc;
+  }
+
+  function reset(text){
+    clearTimers(); running = false;
+    stage.classList.add("idle");
+    setCircle(SMALL, .8);
+    phase.textContent = text || "Toca para empezar";
+    count.textContent = "";
+    btn.textContent = text ? "Otra vez" : "Comenzar";
+    stage.setAttribute("aria-label","Comenzar ejercicio de respiración");
+    modeBtns.forEach(function(b){ b.disabled = false; });
+  }
+
+  function start(){
+    var cfg = MODES[mode];
+    running = true;
+    stage.classList.remove("idle");
+    btn.textContent = "Detener";
+    stage.setAttribute("aria-label","Detener ejercicio de respiración");
+    modeBtns.forEach(function(b){ b.disabled = true; });
+    // breve preparación
+    phase.textContent = "Prepárate";
+    count.textContent = "";
+    meta.textContent = "";
+    setCircle(SMALL, .8);
+    later(function(){ runCycle(cfg, 1); }, 1500);
+  }
+
+  function runCycle(cfg, n){
+    if(!running) return;
+    meta.textContent = "Ciclo " + n + " de " + cfg.cycles;
+    var t = 0;
+    cfg.steps.forEach(function(s){
+      later(function(){ runStep(s[0], s[1], s[2]); }, t * 1000);
+      t += s[1];
+    });
+    later(function(){
+      if(n < cfg.cycles){ runCycle(cfg, n + 1); }
+      else { meta.textContent = cfg.cycles + " ciclos completados"; reset("Listo"); }
+    }, t * 1000);
+  }
+
+  function runStep(name, secs, scale){
+    if(!running) return;
+    phase.textContent = name;
+    setCircle(scale, secs);
+    for(var i = 0; i < secs; i++){
+      (function(left){ later(function(){ if(running) count.textContent = left; }, (secs - left) * 1000); })(secs - i);
+    }
+  }
+
+  function toggle(){ running ? (reset(), meta.textContent = "") : start(); }
+
+  stage.addEventListener("click", toggle);
+  btn.addEventListener("click", toggle);
+  modeBtns.forEach(function(b){ b.addEventListener("click", function(){ if(!running) selectMode(b.dataset.mode); }); });
+
+  selectMode(mode);
+})();
+</script>
+</body>
+</html>
